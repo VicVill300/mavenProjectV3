@@ -2,42 +2,55 @@ pipeline {
     agent any
 
     environment {
-        SONARQUBE_SERVER = 'http://host.docker.internal:9000'
-        DOCKER_IMAGE = 'villegas7155/java-app:latest'
+        SONARQUBE_SERVER = 'http://sonar:9000'
+        SONAR_TOKEN = credentials('sonar_for_jenkins')
+        DOCKER_IMAGE = 'villegas7155/maven-java-app:latest'
+        KUBE_CONTEXT = 'kube/config'
     }
 
     stages {
-        stage('Checkout') {
+        stage('Clean Workspace') {
             steps {
-                git branch: 'main', url: 'https://github.com/VicVill300/mavenProjectV3.git'
+                cleanWs()
             }
         }
 
-        stage('Build') {
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/VicVill300/mavenProjectV3.git', branch: 'main'
+            }
+        }
+
+        stage('Build with Java 17') {
             steps {
                 script {
-                    docker.image('openjdk:11-jdk').inside {
-                        bat 'mvn clean package'
+                    docker.image('maven:3.9.6-eclipse-temurin-17').inside('--network ci_network') {
+                        sh 'mvn clean compile'
                     }
                 }
             }
         }
 
-        stage('Test') {
+        stage('Test with Java 11') {
             steps {
                 script {
-                    docker.image('openjdk:14-jdk').inside {
+                    docker.image('maven:3.9.6-eclipse-temurin-11').inside('--network ci_network') {
                         sh 'mvn test'
                     }
                 }
             }
         }
 
-        stage('Static Code Analysis') {
+        stage('SonarQube Analysis (Java 14)') {
             steps {
                 script {
-                    docker.image('openjdk:17-jdk').inside {
-                        sh 'mvn sonar:sonar -Dsonar.host.url=${SONARQUBE_SERVER}'
+                    docker.image('maven:3.9.6-eclipse-temurin-14').inside('--network ci_network') {
+                        sh """
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=maven-java-app \
+                                -Dsonar.host.url=${SONARQUBE_SERVER} \
+                                -Dsonar.login=${SONAR_TOKEN}
+                        """
                     }
                 }
             }
@@ -45,13 +58,51 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE} ."
+                sh 'docker build -t ${DOCKER_IMAGE} .'
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([
+                    usernamePassword(credentialsId: 'docker_for_jenkins', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')
+                ]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push ${DOCKER_IMAGE}
+                    '''
                 }
             }
         }
 
-        
-        
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'kubeconfig_for_jenkins_proxy', variable: 'KUBE_ARCHIVE')
+                ]) {
+                    sh '''
+                        echo "📦 Extracting kubeconfig..."
+                        mkdir -p kube
+                        unzip -o $KUBE_ARCHIVE -d kube
+
+                        echo "🚀 Deploying Deployment and Service..."
+                        kubectl apply -f deployment.yaml --kubeconfig=kube/config --validate=false
+                        kubectl apply -f service.yaml --kubeconfig=kube/config --validate=false
+
+                        echo "📈 Waiting for rollout..."
+                        kubectl rollout status deployment/maven-java-app --kubeconfig=kube/config --timeout=60s
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+        failure {
+            echo '❌ Pipeline failed. Check logs.'
+        }
     }
 }
