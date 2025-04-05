@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: java-hello-world
+  name: maven-java-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: java-hello-world
+      app: maven-java-app
   template:
     metadata:
       labels:
-        app: java-hello-world
+        app: maven-java-app
     spec:
       containers:
-        - name: java-hello-world
-          image: villegas7155/java-hello-world:latest
+        - name: maven-java-app
+          image: villegas7155/maven-java-app:latest
           ports:
             - containerPort: 8080
