@@ -1,14 +1,4 @@
-# Use official OpenJDK image
-FROM openjdk:17-slim
-
-# Set working directory inside the container
+FROM openjdk:21-jdk-slim
 WORKDIR /app
-
-# Copy the compiled JAR from Maven build
-COPY target/*.jar app.jar
-
-# Expose the port your app runs on
-EXPOSE 8080
-
-# Run the application
+COPY target/mavenprojectV2withmathUtils-1.0-SNAPSHOT.jar app.jar
 CMD ["java", "-jar", "app.jar"]
